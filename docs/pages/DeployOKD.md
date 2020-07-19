@@ -4,20 +4,24 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
 
 | | |
 |-|-|
-| `DeployLbNode.sh` | Creates a virtual machine that will install and configure HA-Proxy |
-| `UnDeployLbNode.sh` | Destroys the load balancer VM and supporting infrastructure |
+| `DeployLabGuest.sh` | Creates a virtual machine that will kickstart based on a specific role.  We will use it to configure the HA-Proxy load balancer |
+| `UnDeployLabGuest.sh` | Destroys a guest VM and supporting infrastructure |
 | `DeployOkdNodes.sh` | Creates the Bootstrap, Master, and Worker VMs from an inventory file, (described below) |
 | `UnDeployOkdNodes.sh` | Destroys the OKD cluster and all supporting infrastructure |
 | `PowerOnVms.sh` | Helper script that uses IPMI to power on the VMs listed in an inventory file |
 
-1. Deploy the load-balancer:
+1. Deploy the load-balancer: (Replace `bastion` with the hostname of your bastion host if you used a different name.)
 
-       DeployLbNode.sh -h=okd4-lb01 -n=bastion -v=6228
+       DeployLabGuest.sh -h=okd4-lb01 -n=bastion -r=lb-node -c=2 -m=4096 -d=50 -v=6228
 
     | | | | |
     |-|-|-|-|
     | -h | Sets Hostname: | okd4-lb01 | __*DNS `A` and `PTR` records must exist*__ |
     | -n | Sets the Hypervisor Host | bastion | |
+    | -r | Sets the kickstart file to lb-node.ks | |
+    | -c | Sets the vCPU count | |
+    | -m | Sets the guest memory | |
+    | -d | Sets the guest root disk volume in GB | |
     | -v  | Sets the VBMC Port | 6228 | |
 
     This will create a VM which will do a kickstart install of CentOS with HA-Proxy.  It will pull the haproxy.cfg file that we prepared earlier when we set up Nginx.  If you are curious about the installation, take a look at: 
@@ -121,7 +125,7 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
 
         Add an entry for your Nexus secret, so that the file looks like this:
            
-           {"auths": {"quay.io": {"auth": "Y2dydXZlcREDACTEDrNmpiL34MVZHeGt2YpREDACTEDptNVlxS9ZTFIUREDACTEDM4bmZB", "email": ""},"nexus.your.domain.org:5002": {"auth": "PASTE_NEW_SECRET_HERE", "email": ""}}}
+           {"auths": {"quay.io": {"auth": "Y2dydXZlcREDACTEDrNmpiL34MVZHeGt2YpREDACTEDptNVlxS9ZTFIUREDACTEDM4bmZB", "email": ""},"nexus.your.domain.org:5001": {"auth": "PASTE_NEW_SECRET_HERE", "email": ""}}}
 
         Save this file.
 
@@ -140,7 +144,7 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
        apiVersion: v1
        baseDomain: %%LAB_DOMAIN%%
        metadata:
-         name: okd4
+         name: %%CLUSTER_NAME%%
        networking:
          networkType: OpenShiftSDN
          clusterNetwork:
@@ -151,7 +155,7 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
          machineNetwork:
          - cidr: 10.11.11.0/24
        compute:
-         name: worker
+       - name: worker
          replicas: 0
        controlPlane:
          name: master
@@ -163,6 +167,12 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
        additionalTrustBundle: |
 
        imageContentSources:
+       - mirrors:
+         - nexus.%%LAB_DOMAIN%%:5001/origin
+         source: registry.svc.ci.openshift.org/origin/%%OKD_VER%%
+       - mirrors:
+         - nexus.%%LAB_DOMAIN%%:5001/origin
+         source: registry.svc.ci.openshift.org/origin/release
 
     Copy this file to our working directory.
 
@@ -171,7 +181,7 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
     Patch in some values:
 
         sed -i "s|%%LAB_DOMAIN%%|${LAB_DOMAIN}|g" ${OKD4_LAB_PATH}/install-config-upi.yaml
-        SECRET=$(cat ${OKD4_LAB_PATH}/pull-secret.json)
+        SECRET=$(cat ${OKD4_LAB_PATH}/pull_secret.json)
         sed -i "s|%%PULL_SECRET%%|${SECRET}|g" ${OKD4_LAB_PATH}/install-config-upi.yaml
         SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
         sed -i "s|%%SSH_KEY%%|${SSH_KEY}|g" ${OKD4_LAB_PATH}/install-config-upi.yaml
@@ -191,18 +201,16 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
        apiVersion: v1
        baseDomain: your.domain.org
        metadata:
-         name: okd4
+         name: %%CLUSTER_NAME%%
        networking:
          networkType: OpenShiftSDN
          clusterNetwork:
-        - cidr: 10.100.0.0/14 
+         - cidr: 10.100.0.0/14 
            hostPrefix: 23 
          serviceNetwork: 
-        - 172.30.0.0/16
-         machineNetwork:
-        - cidr: 10.11.11.0/24
+         - 172.30.0.0/16
        compute:
-         name: worker
+       - name: worker
          replicas: 0
        controlPlane:
          name: master
@@ -246,25 +254,31 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
          aUEYgiOJjUjLXGJSuDVdCo4J9kpQa5D1bUxcHxTp3R98CasnREDACTEDREDACTED
          -----END CERTIFICATE-----
        imageContentSources:
+       - mirrors:
+         - nexus.your.domain.org:5001/origin
+         source: registry.svc.ci.openshift.org/origin/%%OKD_VER%%
+       - mirrors:
+         - nexus.your.domain.org:5001/origin
+         source: registry.svc.ci.openshift.org/origin/release
 
-1. Now mirror the OKD images into the local Nexus:
+2. Now mirror the OKD images into the local Nexus:
 
        oc adm -a ${LOCAL_SECRET_JSON} release mirror --from=${OKD_REGISTRY}:${OKD_RELEASE} --to=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY} --to-release-image=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY}:${OKD_RELEASE}
 
     The output should look something like:
 
        Success
-       Update image:  nexus.oscluster.clgcom.org:5002/origin:4.4.0-0.okd-2020-03-11-174228
-       Mirror prefix: nexus.oscluster.clgcom.org:5002/origin
+       Update image:  nexus.oscluster.clgcom.org:5001/origin:4.4.0-0.okd-2020-03-11-174228
+       Mirror prefix: nexus.oscluster.clgcom.org:5001/origin
 
        To use the new mirrored repository to install, add the following section to the install-config.yaml:
 
        imageContentSources:
        - mirrors:
-         - nexus.oscluster.clgcom.org:5002/origin
+         - nexus.oscluster.clgcom.org:5001/origin
          source: registry.svc.ci.openshift.org/origin/4.4-2020-03-13-191636
        - mirrors:
-         - nexus.oscluster.clgcom.org:5002/origin
+         - nexus.oscluster.clgcom.org:5001/origin
          source: registry.svc.ci.openshift.org/origin/release
 
 
@@ -277,51 +291,25 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
        spec:
          repositoryDigestMirrors:
          - mirrors:
-           - nexus.oscluster.clgcom.org:5002/origin
+           - nexus.oscluster.clgcom.org:5001/origin
            source: registry.svc.ci.openshift.org/origin/4.4-2020-03-13-191636
          - mirrors:
-           - nexus.oscluster.clgcom.org:5002/origin
+           - nexus.oscluster.clgcom.org:5001/origin
            source: registry.svc.ci.openshift.org/origin/release
 
-1. Now, we need to add one last entry to `${OKD4_LAB_PATH}/install-config-upi.yaml`
+3. Create the cluster virtual machines and set up for OKD installation:
 
-    From the output of the mirror command that we just ran, copy the `yaml` for `imageContentSources:` and paste it at the bottom of the `install-config-upi.yaml` where there is an empty `imageContentSources:` section.
-
-       apiVersion: v1
-       baseDomain: your.domain.org
-       metadata:
-         name: okd4
-
-         ...
-
-         fcZ7JFw3gOtsk6Mi3XtS6rxSKpVqUWJ8REDACTEDREDACTED3nafC2IQCmBU2KIZ
-         3Oir8xCyVjgf4EY/dQc5GpIxrJ3dV+U2Hna3ZsiCooAdq957REDACTEDREDACTED
-         REDACTEDREDACTED57krXJy+4z8CdSMa36Pmc115nrN9Ea5C12d6UVnHnN+Kk4cL
-         Wr9ZZSO3jDiwuzidREDACTEDREDACTEDk/IP3tkLtS0s9gWDdHdHeW0eit+trPib
-         Oo9fJIxuD246HTQb+51ZfrvyBcbAA/M3REDACTEDREDACTED06B/Uq4CQMjhRwrU
-         aUEYgiOJjUjLXGJSuDVdCo4J9kpQa5D1bUxcHxTp3R98CasnREDACTEDREDACTED
-         -----END CERTIFICATE-----
-       imageContentSources:
-       - mirrors:
-         - nexus.oscluster.clgcom.org:5002/origin
-         source: registry.svc.ci.openshift.org/origin/4.4-2020-03-13-191636
-       - mirrors:
-         - nexus.oscluster.clgcom.org:5002/origin
-         source: registry.svc.ci.openshift.org/origin/release
-
-1. Create the cluster virtual machines and set up for OKD installation:
-
-       DeployOkdNodes.sh -i=${OKD4_LAB_PATH}/guest-inventory/okd4 -p -m -d1
+       DeployOkdNodes.sh -i=${OKD4_LAB_PATH}/guest-inventory/okd4 -p -m -n=okd4
 
     This script does a whole lot of work for us.
 
     1. It will pull the current versions of `oc` and `openshift-install` based on the value of `${OKD_RELEASE}` that we set previously.
-    2. Invokes the openshift-install command against our install-config to produce ignition files
-    3. Copies the ignition files into place for FCOS install
-    4. Sets up for a mirrored install by putting `registry.svc.ci.openshift.org` into a DNS sinkhole.
-    5. Creates guest VMs based on the inventory file at `${OKD4_LAB_PATH}/guest-inventory/okd4`
-    6. Creates DHCP reservations for each VM
-    7. Creates iPXE boot files for each VM and copies them to the iPXE server, (your router)
+    1. fills in the OKD version and `%%CLUSTER_NAME%%` in the install-config-upi.yaml file and copies that file to the install directory as install-config.yaml.
+    1. Invokes the openshift-install command against our install-config to produce ignition files
+    1. Copies the ignition files into place for FCOS install
+    1. Sets up for a mirrored install by putting `registry.svc.ci.openshift.org` into a DNS sinkhole.
+    1. Creates guest VMs based on the inventory file at `${OKD4_LAB_PATH}/guest-inventory/okd4`
+    1. Creates iPXE boot files for each VM and copies them to the iPXE server, (your router)
 
 # We are now ready to fire up our OKD cluster!!!
 
@@ -348,6 +336,10 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
        done
 
 ### Now let's sit back and watch the install:
+
+__Note: It is normal to see logs which look like errors while `bootkube` and `kublet` are waiting for resources to be provisioned.__
+
+__Don't be alarmed if you see streams of `connection refused` errors for a minute or two.__  If the errors persist for more than a few minutes, then you might have real issues, but be patient.
 
 * To watch a node boot and install:
   * Bootstrap node from the Bastion host:
@@ -376,6 +368,11 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
 
         ssh root@okd4-lb01 "cat /etc/haproxy/haproxy.cfg | grep -v bootstrap > /etc/haproxy/haproxy.tmp && mv /etc/haproxy/haproxy.tmp /etc/haproxy/haproxy.cfg && systemctl restart haproxy.service"
 
+    Destroy the Bootstrap Node on the Bastion host:
+
+        virsh destroy okd4-bootstrap
+        vbmc delete okd4-bootstrap
+
   * Install Progress:
 
         openshift-install --dir=${OKD4_LAB_PATH}/okd4-install-dir wait-for install-complete --log-level debug
@@ -392,6 +389,17 @@ I have provided a set of utility scripts to automate a lot of the tasks associat
       INFO To access the cluster as the system:admin user when using 'oc', run 'export KUBECONFIG=/root/okd4-lab/okd4-install-dir/auth/kubeconfig' 
       INFO Access the OpenShift web-console here: https://console-openshift-console.apps.okd4.your.domain.org 
       INFO Login to the console with user: kubeadmin, password: aBCdE-FGHiJ-klMNO-PqrSt
+
+### Log into your new cluster console:
+
+Point your browser to the url listed at the completion of install: `https://console-openshift-console.apps.okd4.your.domain.org`
+Log in as `kubeadmin` with the password from the output at the completion of the install.
+
+__If you forget the password for this initial account, you can find it in the file: `${OKD4_LAB_PATH}/okd4-install-dir/auth/kubeadmin-password`
+
+__Note: the first time you try to log in, you may have to wait a bit for all of the console resources to initialize.__
+
+You will have to accept the certs for your new cluster.
 
 ### Issue commands against your new cluster:
 
@@ -414,3 +422,20 @@ Create an Empty volume for registry storage:
 
     openshift-install --dir=okd4-install gather bootstrap --bootstrap 10.11.11.49 --master 10.11.11.60 --master 10.11.11.61 --master 10.11.11.62
 
+### Next: 
+
+1. Create an Image Pruner:
+
+       oc patch imagepruners.imageregistry.operator.openshift.io/cluster --type merge -p '{"spec":{"schedule":"0 0 * * *","suspend":false,"keepTagRevisions":3,"keepYoungerThan":60,"resources":{},"affinity":{},"nodeSelector":{},"tolerations":[],"startingDeadlineSeconds":60,"successfulJobsHistoryLimit":3,"failedJobsHistoryLimit":3}}'
+1. [Designate your Master Nodes as Infrastructure Nodes](InfraNodes.md)
+
+    __Do Not do this step if you do not have dedicated `worker` nodes.__
+
+    If you have dedicated worker nodes in addition to three master nodes, then I recommend this step to pin your Ingress Routers to the Master nodes.  If they restart on worker nodes, you will lose Ingress access to your cluster unless you add the worker nodes to your external HA Proxy configuration.  I prefer to use Infrasturcture nodes to run the Ingress routers and a number of other pods.
+
+1. [Set up Htpasswd as an Identity Provider](HtPasswd.md)
+1. [Deploy a Ceph cluster for block storage provisioning](Ceph.md)
+1. [Create a MariaDB Galera StatefulSet](MariaDB.md)
+1. [Updating Your Cluster](UpdateOKD.md)
+1. Coming soon...  Tekton pipeline for Quarkus and Spring Boot applications.
+1. [Gracefully shut down your cluster](ShuttingDown.md)

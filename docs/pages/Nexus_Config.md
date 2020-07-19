@@ -55,7 +55,7 @@ Now, we will enable Nexus to auto-start at boot, but not start it yet:
 
 Before we start Nexus, let's go ahead a set up TLS so that our connections are secure from prying eyes.
 
-1. Generate a Java Key Store replacing the DNS entries with the entires relevant to your environment:  (Remember, in the DNS configuration we named our control plane server `ocp-controller01`.  If you used a different host name, you need to change it below)
+1. Generate a Java Key Store.
 
        openssl req -newkey rsa:4096 -nodes -sha256 -keyout nexus.key -x509 -days 5000 -out nexus.crt
 
@@ -67,10 +67,14 @@ Before we start Nexus, let's go ahead a set up TLS so that our connections are s
         # Common Name (eg, your name or your server's hostname) []:nexus.your.domain.org
         # Email Address []:
 
-        openssl pkcs12 -export -in nexus.crt -inkey nexus.key -chain -CAfile nexus-ca-file.crt -name "${LAB_DOMAIN}" -out nexus.p12
+    Now create the key.  Use `password` for the password.
+
+        openssl pkcs12 -export -in nexus.crt -inkey nexus.key -name "${LAB_DOMAIN}" -out nexus.p12
         keytool -importkeystore -deststorepass password -destkeystore keystore.jks -srckeystore nexus.p12 -srcstoretype PKCS12
+        keytool -importkeystore -srckeystore keystore.jks -destkeystore keystore.jks -deststoretype pkcs12
 
         cp keystore.jks /usr/local/nexus/nexus-3/etc/ssl/keystore.jks
+        chown nexus:nexus /usr/local/nexus/nexus-3/etc/ssl/keystore.jks
         cp nexus.crt /etc/pki/ca-trust/source/anchors/nexus.crt
         update-ca-trust
 
@@ -81,12 +85,15 @@ Before we start Nexus, let's go ahead a set up TLS so that our connections are s
        nexus-args=\${jetty.etc}/jetty.xml,\${jetty.etc}/jetty-https.xml,\${jetty.etc}/jetty-requestlog.xml
        application-port-ssl=8443
        EOF
+       chown -R nexus:nexus /usr/local/nexus/sonatype-work/nexus3/etc
 
 Now we should be able to start Nexus and connect to it with a browser:
 
     systemctl start nexus
 
 Now point your browser to `https://nexus.your.domain.com:8443`.  Login, and create a password for your admin user.
+
+If prompted to allow anonymous access, select to allow.
 
 The `?` in the top right hand corner of the Nexus screen will take you to their documentation.
 

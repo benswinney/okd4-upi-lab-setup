@@ -32,14 +32,14 @@ eula --agreed
 
 %pre
 j=$(cat /sys/class/net/eno1/address)
-NET_MAC=${j/-/:}
+NET_MAC=${j//:/-}
 curl -o /tmp/install-vars %%INSTALL_URL%%/hostconfig/${NET_MAC}
 source /tmp/install-vars
 
 cat << EOF > /tmp/net-info
 network  --hostname=${HOST_NAME}
 network  --device=eno1 --noipv4 --noipv6 --no-activate --onboot=no
-network  --bootproto=static --device=br0 --bridgeslaves=eno1 --gateway=${GATEWAY} --ip=${IP_01} --nameserver=${NAME_SERVER} --netmask=${NETMASK_01} --noipv6 --activate --bridgeopts="stp=false" --onboot=yes
+network  --bootproto=static --device=br0 --bridgeslaves=eno1 --gateway=${GATEWAY_01} --ip=${IP_01} --nameserver=${NAME_SERVER} --netmask=${NETMASK_01} --noipv6 --activate --bridgeopts="stp=false" --onboot=yes
 EOF
 
 if [ ${NIC_02} != "" ]
@@ -48,6 +48,7 @@ cat << EOF >> /tmp/net-info
 network  --device=${NIC_02} --noipv4 --noipv6 --no-activate --onboot=no
 network  --bootproto=static --device=br1 --bridgeslaves=${NIC_02} --ip=${IP_02} --netmask=${NETMASK_02} --noipv6 --activate --bridgeopts="stp=false" --onboot=yes
 EOF
+fi
 
 if [ -d /sys/block/sdb ]
 then
